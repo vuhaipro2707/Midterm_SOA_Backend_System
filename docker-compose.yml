@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  gateway:
+    build: 
+      context: ./ApiGateway 
+    container_name: api_gateway
+    ports:
+      - "8080:8080"
+    networks:
+      - internal_network
+    # depends_on:
+      # - system-a
+      # - system-b
+    volumes:
+      - ./ApiGateway/app:/app
+      # Tùy chọn: Volume cho các dependency (để tránh ghi đè các thư viện đã cài)
+      - /app/venv
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: student_db
+    environment:
+      POSTGRES_DB: mydatabase
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    # volumes:
+    #   - postgres_data:/var/lib/postgresql/data/ # Dùng Named Volume để lưu trữ dữ liệu
+    networks:
+      - internal_network
+
+  tuition-service:
+    build: 
+      context: ./tuition-service 
+    container_name: tuition_service
+    expose: 
+      - "8081"
+    networks:
+      - internal_network
+    depends_on:
+      - postgres
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/mydatabase
+      SPRING_DATASOURCE_USERNAME: user
+      SPRING_DATASOURCE_PASSWORD: password
+      SERVER_PORT: 8081
+
+  payment-processor-service:
+    build: 
+      context: ./payment-processor-service
+    container_name: payment_processor_service
+    expose: 
+      - "8082"
+    networks:
+      - internal_network
+    depends_on:
+      - postgres
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/mydatabase
+      SPRING_DATASOURCE_USERNAME: user
+      SPRING_DATASOURCE_PASSWORD: password
+      SERVER_PORT: 8082
+
+  customer-account-service:
+    build: 
+      context: ./customer-account-service
+    container_name: customer-account_service
+    expose: 
+      - "8083"
+    networks:
+      - internal_network
+    depends_on:
+      - postgres
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/mydatabase
+      SPRING_DATASOURCE_USERNAME: user
+      SPRING_DATASOURCE_PASSWORD: password
+      SERVER_PORT: 8083
+
+networks:
+  internal_network:
+    driver: bridge
+
+# volumes:
+#   postgres_data:
