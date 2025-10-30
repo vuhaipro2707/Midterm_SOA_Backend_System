@@ -1,16 +1,28 @@
 version: '3.8'
 
 services:
-  tuition-service:
+
+  auth-service:
     build: 
-      context: ./tuition-service 
+      context: ./auth-service
       dockerfile: Dockerfile.dev
     volumes:
-      - ./tuition-service:/app
+      - ./auth-service:/app
       - ./.m2cache:/root/.m2
     command: ["mvn", "spring-boot:run"]
     ports: 
       - "8081:8081"
+
+  customer-management-service:
+    build: 
+      context: ./customer-management-service 
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./customer-management-service:/app
+      - ./.m2cache:/root/.m2
+    command: ["mvn", "spring-boot:run"]
+    ports: 
+      - "8082:8082"
 
   payment-processor-service:
     build: 
@@ -21,15 +33,17 @@ services:
       - ./.m2cache:/root/.m2
     command: ["mvn", "spring-boot:run"]
     ports: 
-      - "8082:8082"
-
-  customer-account-service:
+      - "8083:8083"
+  
+  tuition-service:
     build: 
-      context: ./customer-account-service
+      context: ./tuition-service 
       dockerfile: Dockerfile.dev
     volumes:
-      - ./customer-account-service:/app
+      - ./tuition-service:/app
       - ./.m2cache:/root/.m2
     command: ["mvn", "spring-boot:run"]
     ports: 
-      - "8083:8083"
+      - "8084:8084"
+
+  

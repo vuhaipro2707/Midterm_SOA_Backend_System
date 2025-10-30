@@ -29,10 +29,10 @@ services:
     networks:
       - internal_network
 
-  tuition-service:
+  auth-service:
     build: 
-      context: ./tuition-service 
-    container_name: tuition_service
+      context: ./auth-service
+    container_name: auth-service
     expose: 
       - "8081"
     networks:
@@ -44,6 +44,22 @@ services:
       SPRING_DATASOURCE_USERNAME: user
       SPRING_DATASOURCE_PASSWORD: password
       SERVER_PORT: 8081
+
+  customer-management-service:
+    build: 
+      context: ./customer-management-service
+    container_name: customer_management_service
+    expose: 
+      - "8082"
+    networks:
+      - internal_network
+    depends_on:
+      - postgres
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/mydatabase
+      SPRING_DATASOURCE_USERNAME: user
+      SPRING_DATASOURCE_PASSWORD: password
+      SERVER_PORT: 8082
 
   payment-processor-service:
     build: 
@@ -59,12 +75,12 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/mydatabase
       SPRING_DATASOURCE_USERNAME: user
       SPRING_DATASOURCE_PASSWORD: password
-      SERVER_PORT: 8082
+      SERVER_PORT: 8083
 
-  customer-account-service:
+  tuition-service:
     build: 
-      context: ./customer-account-service
-    container_name: customer-account_service
+      context: ./tuition-service 
+    container_name: tuition_service
     expose: 
       - "8083"
     networks:
@@ -75,7 +91,7 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/mydatabase
       SPRING_DATASOURCE_USERNAME: user
       SPRING_DATASOURCE_PASSWORD: password
-      SERVER_PORT: 8083
+      SERVER_PORT: 8084
 
 networks:
   internal_network:

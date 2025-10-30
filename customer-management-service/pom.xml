@@ -9,10 +9,10 @@
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
 	<groupId>com.example</groupId>
-	<artifactId>payment-processor-service</artifactId>
+	<artifactId>customer-management-service</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name>Payment Processor Service</name>
-	<description>Handles payment transaction processing and records.</description>
+	<name>Customer Management Service</name>
+	<description>Handles customer information and management.</description>
 	<url/>
 	<licenses>
 		<license/>

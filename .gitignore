@@ -71,3 +71,17 @@ ApiGateway/venv/
 # ====================================================================
 # Nếu bạn có file cấu hình local chứa mật khẩu, hãy bỏ qua nó:
 # application-local.properties
+
+# 7. JWT Asymmetric Keys (Bắt buộc phải bỏ qua Private Key!)
+######################################
+# Private Key được dùng để KÝ token
+*/src/main/resources/keys/private_key.pem 
+ApiGateway/app/public_key.pem
+
+# 8. Local Configuration Files
+######################################
+# Các file cấu hình local chứa bí mật (ví dụ: database password)
+# Nếu bạn không sử dụng biến môi trường Docker Compose mà dùng file local
+application-local.properties
+application-dev.properties
+*.env

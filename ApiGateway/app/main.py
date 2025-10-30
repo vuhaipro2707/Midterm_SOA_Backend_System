@@ -1,37 +1,54 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 import httpx
+from jose import jwt, JWTError
+import os
+from json.decoder import JSONDecodeError
+from urllib.parse import quote
 
 app = FastAPI(title="API Gateway")
 
+PUBLIC_KEY_PATH = os.path.join(os.path.dirname(__file__), "public_key.pem")
+ALGORITHM = "RS256"
 
 SYSTEM_SERVICES = {
-    "tuition": "http://tuition-service:8081",
-    "payment": "http://payment-processor-service:8082",
-    "account": "http://customer-account-service:8083", 
+    "auth": "http://auth-service:8081", 
+    "customer": "http://customer-management-service:8082",
+    "payment": "http://payment-processor-service:8083",
+    "tuition": "http://tuition-service:8084",
 }
 
-# Khởi tạo httpx client cho các request bất đồng bộ
-# timeout=None là để chờ phản hồi của system, có thể đặt giá trị cụ thể
 client = httpx.AsyncClient(timeout=None)
 
-# ----------------------------------------------------
-# Endpoint cho Health Check của Gateway
-# ----------------------------------------------------
-@app.get("/health")
-async def health_check():
-    return {"status": "Gateway is running."}
+def get_public_key():
+    try:
+        with open(PUBLIC_KEY_PATH, "r") as f:
+            public_key_pem = f.read()
+            return public_key_pem
+    except FileNotFoundError:
+        raise RuntimeError("Public Key file not found!")
+    except Exception as e:
+        raise RuntimeError(f"Error reading Public Key: {e}")
 
-# ----------------------------------------------------
-# Logic Định Tuyến (Catch-all Proxy)
-# ----------------------------------------------------
-# Sử dụng @app.api_route("/{path:path}"). Nó sẽ bắt tất cả các request đến.
+try:
+    PUBLIC_KEY = get_public_key()
+except RuntimeError as e:
+    print(f"FATAL ERROR: {e}")
+
+def decode_jwt_token(token: str):
+    try:
+        payload = jwt.decode(
+            token, 
+            PUBLIC_KEY,
+            algorithms=[ALGORITHM]
+        )
+        return payload
+    except JWTError as e:
+        raise HTTPException(status_code=401, detail=f"Invalid authentication credentials: {e}")
+
+
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
 async def proxy_requests(path: str, request: Request):
-    
-    # 1. Xác định dịch vụ mục tiêu dựa trên đường dẫn
-    # Ví dụ: /system-a/users -> service_name = system-a
-    #         /system-b/products -> service_name = system-b
     try:
         service_name, sub_path = path.split("/", 1)
     except ValueError:
@@ -42,22 +59,43 @@ async def proxy_requests(path: str, request: Request):
         
     base_url = SYSTEM_SERVICES[service_name]
     
-    # 2. Xây dựng URL đích
-    # URL đích: http://system-a:8081/users?param=value
-    target_url = f"{base_url}/{sub_path}"
-    
-    # 3. Sao chép header và body
     headers = dict(request.headers)
-    
-    # Lấy body (dùng .json() cho POST/PUT/PATCH)
+
+    if "content-length" in headers:
+        del headers["content-length"]
+    if "transfer-encoding" in headers:
+        del headers["transfer-encoding"]
+
+    is_public_path = (service_name == "auth" and (sub_path.startswith("login") or sub_path.startswith("logout")))
+
+    if not is_public_path:
+        token = request.cookies.get("jwt_token") 
+        
+        if not token:
+            raise HTTPException(status_code=401, detail="Authentication required. JWT Cookie not found.")
+
+        try:
+            token_payload = decode_jwt_token(token)
+        except HTTPException as e:
+            response = JSONResponse(
+                content={"detail": "Authentication token expired or invalid."},
+                status_code=401
+            )
+            response.delete_cookie(key="jwt_token", path="/", httponly=True)
+            return response
+        
+        customer_id = token_payload.get("customerId")
+
+        headers["X-Customer-Id"] = str(customer_id)
+
     try:
         json_data = await request.json()
     except:
         json_data = None
         
-    # 4. Gửi request đến System mục tiêu
+    target_url = f"{base_url}/{sub_path}"
+    
     try:
-        # Gửi request bằng phương thức gốc (GET, POST, PUT, v.v.)
         response = await client.request(
             method=request.method,
             url=target_url,
@@ -65,17 +103,38 @@ async def proxy_requests(path: str, request: Request):
             json=json_data,
             params=request.query_params
         )
+
+        response_content = None
+
+        try:
+            response_content = response.json()
+            
+        except JSONDecodeError as e:
+
+            raise HTTPException(
+                status_code=502, # 502 Bad Gateway: Lỗi từ Server trung gian (Backend)
+                detail={
+                    "error": f"Backend service '{service_name}' returned non-JSON data.",
+                    "status_code": response.status_code,
+                    "raw_response": response.text[:200] # Giới hạn 200 ký tự để tránh payload lớn
+                }
+            )
         
-        # 5. Trả về response từ System mục tiêu cho Client
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"An unexpected error occurred while processing response from '{service_name}': {e}"
+            )
+
         return JSONResponse(
-            content=response.json(),
+            content=response_content,
             status_code=response.status_code,
-            headers=response.headers
+            headers=dict(response.headers)
         )
         
     except httpx.ConnectError:
-        # Xử lý khi không thể kết nối đến System
         raise HTTPException(status_code=503, detail=f"Service '{service_name}' unavailable.")
+    except HTTPException:
+        raise 
     except Exception as e:
-        # Xử lý lỗi khác
         raise HTTPException(status_code=500, detail=f"An error occurred: {e}")
