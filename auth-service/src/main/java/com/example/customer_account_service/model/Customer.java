@@ -11,33 +11,34 @@ import java.util.List;
 
 @Entity
 @Table(name = "customers")
-@Data // Lombok: Tự động tạo getters, setters, toString, v.v.
+@Data
 public class Customer implements UserDetails {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long customerId; // Primary Key
+    private Long customerId;
 
     @Column(unique = true, nullable = false)
-    private String username; // Dùng cho đăng nhập
+    private String username;
 
     @Column(nullable = false)
-    private String password; // Mật khẩu đã mã hóa
+    private String password;
 
     @Column(nullable = false)
-    private String fullName; // Fullname (có dấu tiếng Việt)
+    private String fullName;
+
+    @Column(nullable = false)
+    private String email;
 
     @Column(unique = true)
-    private String phoneNumber; // Phone number (có số 0 đầu)
+    private String phoneNumber;
 
     @Column(nullable = false)
-    private Integer availableBalance = 0; // Số dư khả dụng (VND, số nguyên)
+    private Integer availableBalance = 0;
 
-    private String roles = "ROLE_USER"; // Vai trò mặc định
+    @Column(nullable = false)
+    private String roles = "ROLE_USER"; 
 
-    // ----------------------------------------------------
-    // Triển khai các phương thức của UserDetails
-    // ----------------------------------------------------
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
         return List.of(new SimpleGrantedAuthority(roles));
