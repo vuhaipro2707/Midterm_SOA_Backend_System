@@ -24,7 +24,7 @@ public class TuitionService {
     }
 
     @Transactional
-    public Optional<StudentTuition> updateTuitionStatus(Long tuitionId, String studentId, Boolean isPaid) {
+    public Optional<StudentTuition> updateTuitionStatus(Long tuitionId, Boolean isPaid) {
         Optional<StudentTuition> tuitionOpt = studentTuitionRepository.findById(tuitionId);
 
         if (tuitionOpt.isEmpty()) {
@@ -32,10 +32,6 @@ public class TuitionService {
         }
 
         StudentTuition tuition = tuitionOpt.get();
-
-        if (!tuition.getStudentId().equals(studentId)) {
-            throw new IllegalArgumentException("Tuition record with ID " + tuitionId + " does not belong to student ID " + studentId + ".");
-        }
         
         tuition.setIsPaid(isPaid);
         studentTuitionRepository.save(tuition);

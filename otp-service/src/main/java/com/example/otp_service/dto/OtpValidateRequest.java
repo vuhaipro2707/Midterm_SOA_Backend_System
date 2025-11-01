@@ -1,4 +1,4 @@
-package com.example.payment_processor_service.dto;
+package com.example.otp_service.dto;
 
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -7,8 +7,7 @@ import lombok.AllArgsConstructor;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public class PaymentRequest {
+public class OtpValidateRequest {
     private Long tuitionId;
-    private String studentId;
-    private Integer amount;
+    private String otpCode;
 }

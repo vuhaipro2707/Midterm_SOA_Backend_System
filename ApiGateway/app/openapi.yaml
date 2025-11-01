@@ -1,0 +1,787 @@
+openapi: 3.0.0
+info:
+  title: Hệ thống Quản lý Thanh toán Học phí (Microservices SOA)
+  version: 1.0.0
+  description: |
+    Tài liệu API cho hệ thống Microservices bao gồm Auth, Customer Management, Payment Processor và Tuition Service.
+    
+    Tất cả các request **ngoại trừ /auth/login và /auth/logout** đều yêu cầu xác thực bằng **JWT Cookie** có tên là `jwt_token`. Gateway sẽ tự động trích xuất `customerId` từ JWT và thêm vào header `X-Customer-Id` trước khi gửi đến các dịch vụ backend.
+
+servers:
+  - url: http://localhost:8080 # Địa chỉ mặc định của API Gateway
+
+security:
+  - jwtCookie: [] # Áp dụng bảo mật cho các endpoint không phải là login/logout
+
+tags:
+  - name: Auth Service
+    description: Quản lý xác thực người dùng và cấp phát JWT
+  - name: Customer Management Service
+    description: Quản lý thông tin khách hàng và số dư tài khoản
+  - name: Tuition Service
+    description: Quản lý hồ sơ học phí của sinh viên
+  - name: Payment Processor Service
+    description: Xử lý giao dịch thanh toán học phí (Giao dịch phân tán - Saga Pattern)
+
+paths:
+  # --------------------------------------------------------
+  # AUTH SERVICE ENDPOINTS
+  # --------------------------------------------------------
+  /auth/login:
+    post:
+      tags:
+        - Auth Service
+      summary: Đăng nhập khách hàng và nhận JWT Cookie.
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Đăng nhập thành công, JWT token được đặt trong HttpOnly Cookie.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+                example: "jwt_token=eyJ...; Path=/; HttpOnly; Max-Age=86400"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+              example:
+                message: Login successful
+                details: JWT token set in HttpOnly Cookie.
+        '401':
+          description: Thông tin đăng nhập không hợp lệ.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+              example:
+                message: Authentication failed
+                details: Invalid username or password
+
+  /auth/logout:
+    post:
+      tags:
+        - Auth Service
+      summary: Đăng xuất và xóa JWT Cookie.
+      operationId: logout
+      responses:
+        '200':
+          description: Đăng xuất thành công, Cookie `jwt_token` đã được xóa.
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+                example: "jwt_token=null; Path=/; HttpOnly; Max-Age=0"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+              example:
+                message: Logout successful
+                details: JWT token cleared from HttpOnly Cookie.
+
+  # --------------------------------------------------------
+  # CUSTOMER MANAGEMENT SERVICE ENDPOINTS
+  # --------------------------------------------------------
+  /customer/info:
+    get:
+      tags:
+        - Customer Management Service
+      summary: Lấy thông tin chi tiết của khách hàng đã xác thực.
+      operationId: getCustomerInfo
+      responses:
+        '200':
+          description: Lấy thông tin khách hàng thành công.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/GenericResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/CustomerInfoResponse'
+              example:
+                success: true
+                message: Customer information retrieved successfully.
+                data:
+                  customerId: 1
+                  username: user1
+                  fullName: Nguyễn Văn A
+                  email: nguyenvana@example.com
+                  phoneNumber: "0901234567"
+                  availableBalance: 5000000
+                  roles: ROLE_USER
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Không tìm thấy khách hàng.
+          $ref: '#/components/responses/NotFoundGeneric'
+
+  /customer/balance:
+    get:
+      tags:
+        - Customer Management Service
+      summary: Lấy số dư hiện tại của khách hàng đã xác thực.
+      operationId: getAvailableBalance
+      responses:
+        '200':
+          description: Lấy số dư thành công.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/GenericResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: integer
+                        format: int32
+                        description: Số dư hiện tại.
+              example:
+                success: true
+                message: Current balance retrieved successfully.
+                data: 5000000
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Không tìm thấy khách hàng.
+          $ref: '#/components/responses/NotFoundGeneric'
+
+  /customer/balance/debit:
+    post:
+      tags:
+        - Customer Management Service
+      summary: Ghi nợ (debit) số dư của khách hàng đã xác thực.
+      operationId: debitCustomerBalance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DebitRequest'
+      responses:
+        '200':
+          description: Ghi nợ thành công, trả về số dư mới.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/GenericResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: integer
+                        format: int32
+                        description: Số dư mới sau giao dịch.
+              example:
+                success: true
+                message: Debit successful. New balance is 2200000.
+                data: 2200000
+        '400':
+          description: Lỗi nghiệp vụ (ví dụ 'Insufficient balance' - Không đủ số dư).
+          $ref: '#/components/responses/BadRequestGeneric'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /customer/balance/credit:
+    post:
+      tags:
+        - Customer Management Service
+      summary: Ghi có (credit) số dư của khách hàng đã xác thực. (Dùng cho Compensation)
+      operationId: creditCustomerBalance
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DebitRequest'
+      responses:
+        '200':
+          description: Ghi có thành công, trả về số dư mới.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/GenericResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: integer
+                        format: int32
+                        description: Số dư mới sau giao dịch.
+              example:
+                success: true
+                message: Credit successful. New balance is 7800000.
+                data: 7800000
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # --------------------------------------------------------
+  # TUITION SERVICE ENDPOINTS
+  # --------------------------------------------------------
+  /tuition/studentId/{studentId}:
+    get:
+      tags:
+        - Tuition Service
+      summary: Lấy danh sách các khoản học phí theo ID sinh viên.
+      operationId: getTuitionsByStudentId
+      parameters:
+        - name: studentId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: ID sinh viên (ví dụ 523H1101).
+      responses:
+        '200':
+          description: Lấy danh sách học phí thành công.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/GenericResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/StudentTuition'
+              example:
+                success: true
+                message: Student tuitions retrieved successfully.
+                data:
+                  - tuitionId: 1
+                    studentId: 523H1101
+                    studentName: Nguyễn Văn A
+                    amount: 2800000
+                    semester: "I"
+                    academicYear: 2023-2024
+                    isPaid: false
+                  - tuitionId: 2
+                    studentId: 523H1101
+                    studentName: Nguyễn Văn A
+                    amount: 3500000
+                    semester: "II"
+                    academicYear: 2023-2024
+                    isPaid: true
+        '400':
+          description: ID sinh viên không hợp lệ.
+          $ref: '#/components/responses/BadRequestGeneric'
+        '404':
+          description: Không tìm thấy hồ sơ học phí nào cho ID sinh viên này.
+          $ref: '#/components/responses/NotFoundGeneric'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /tuition/id/{tuitionId}:
+    get:
+      tags:
+        - Tuition Service
+      summary: Lấy chi tiết một khoản học phí theo ID học phí.
+      operationId: getTuitionById
+      parameters:
+        - name: tuitionId
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+          description: ID của khoản học phí.
+      responses:
+        '200':
+          description: Lấy chi tiết học phí thành công.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/GenericResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/StudentTuition'
+              example:
+                success: true
+                message: Tuition retrieved successfully.
+                data:
+                  tuitionId: 1
+                  studentId: 523H1101
+                  studentName: Nguyễn Văn A
+                  amount: 2800000
+                  semester: "I"
+                  academicYear: 2023-2024
+                  isPaid: false
+        '400':
+          description: ID học phí không hợp lệ.
+          $ref: '#/components/responses/BadRequestGeneric'
+        '404':
+          description: Không tìm thấy hồ sơ học phí.
+          $ref: '#/components/responses/NotFoundGeneric'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /tuition/status:
+    post:
+      tags:
+        - Tuition Service
+      summary: Cập nhật trạng thái thanh toán của một khoản học phí. (Chỉ dùng nội bộ bởi Payment Processor)
+      operationId: updateTuitionStatus
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TuitionPaymentRequest'
+      responses:
+        '200':
+          description: Cập nhật trạng thái thành công.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/GenericResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/StudentTuition'
+              example:
+                success: true
+                message: Tuition status updated to PAID successfully.
+                data:
+                  tuitionId: 1
+                  studentId: 523H1101
+                  studentName: Nguyễn Văn A
+                  amount: 2800000
+                  semester: "I"
+                  academicYear: 2023-2024
+                  isPaid: true
+        '400':
+          description: Lỗi dữ liệu request (thiếu trường, sai định dạng).
+          $ref: '#/components/responses/BadRequestGeneric'
+        '403':
+          description: Lỗi nghiệp vụ (ví dụ Học phí không thuộc về sinh viên này).
+          $ref: '#/components/responses/ForbiddenGeneric'
+        '404':
+          description: Không tìm thấy hồ sơ học phí.
+          $ref: '#/components/responses/NotFoundGeneric'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+          
+  # --------------------------------------------------------
+  # PAYMENT PROCESSOR SERVICE ENDPOINTS
+  # --------------------------------------------------------
+  /payment/info:
+    get:
+      tags:
+        - Payment Processor Service
+      summary: Lấy lịch sử giao dịch thanh toán của khách hàng.
+      operationId: getPaymentHistory
+      responses:
+        '200':
+          description: Lịch sử giao dịch được truy xuất thành công.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/GenericResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/PaymentTransaction'
+              example:
+                success: true
+                message: Payment history retrieved successfully.
+                data:
+                  - paymentId: 101
+                    customerId: 1
+                    tuitionId: 1
+                    amount: 2800000
+                    paymentDate: 2025-10-31T10:30:00Z
+                  - paymentId: 102
+                    customerId: 1
+                    tuitionId: 3
+                    amount: 1200000
+                    paymentDate: 2025-10-25T09:15:00Z
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Không tìm thấy giao dịch nào cho khách hàng này.
+          $ref: '#/components/responses/NotFoundGeneric'
+        '500':
+          $ref: '#/components/responses/InternalErrorGeneric'
+
+  /payment/initiate:
+    post:
+      tags:
+        - Payment Processor Service
+      summary: Khởi tạo thanh toán và yêu cầu OTP (Bước 1).
+      operationId: initiatePayment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentInitiateRequest'
+      responses:
+        '200':
+          description: OTP đã được gửi thành công.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/GenericResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: string
+                        description: Thông báo hướng dẫn.
+              example:
+                success: true
+                message: Payment initiation successful.
+                data: OTP has been generated and sent to your email. Please use /confirm to finalize payment.
+        '400':
+          description: Lỗi nghiệp vụ ('Tuition ID already paid', 'Invalid request tuitionId is required.').
+          $ref: '#/components/responses/BadRequestGeneric'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalErrorGeneric'
+
+  /payment/confirm:
+    post:
+      tags:
+        - Payment Processor Service
+      summary: Xác nhận thanh toán bằng OTP (Bước 2).
+      operationId: confirmPayment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentConfirmationRequest'
+      responses:
+        '200':
+          description: Thanh toán thành công, trả về chi tiết giao dịch.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/GenericResponse'
+                  - type: object
+                    properties:
+                      data:
+                        $ref: '#/components/schemas/PaymentTransaction'
+              example:
+                success: true
+                message: Payment confirmed and processed successfully.
+                data:
+                  paymentId: 101
+                  customerId: 1
+                  tuitionId: 1
+                  amount: 2800000
+                  paymentDate: 2025-10-31T10:35:00Z
+        '400':
+          description: Lỗi nghiệp vụ (ví dụ 'Invalid or expired OTP', 'Insufficient balance', 'Invalid request').
+          $ref: '#/components/responses/BadRequestGeneric'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          description: Lỗi hệ thống nội bộ hoặc lỗi không nhất quán trạng thái (sau khi compensation thất bại).
+          $ref: '#/components/responses/InternalErrorGeneric'
+
+  /payment/resend:
+    post:
+      tags:
+        - Payment Processor Service
+      summary: Gửi lại OTP (Overwrites old OTP).
+      operationId: resendOtp
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentInitiateRequest'
+      responses:
+        '200':
+          description: OTP mới đã được gửi thành công.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/GenericResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: string
+                        description: Thông báo hướng dẫn.
+              example:
+                success: true
+                message: Resending OTP successful.
+                data: New OTP has been generated and sent to your email.
+        '400':
+          description: Lỗi nghiệp vụ (ví dụ 'Tuition ID already paid. Resend is unnecessary.').
+          $ref: '#/components/responses/BadRequestGeneric'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalErrorGeneric'
+
+components:
+  schemas:
+    # --------------------------------------------------------
+    # GENERIC RESPONSE & AUTH SCHEMAS
+    # --------------------------------------------------------
+    GenericResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          description: Cho biết request có thành công hay không.
+          example: true
+        message:
+          type: string
+          description: Thông báo mô tả kết quả.
+          example: Current balance retrieved successfully.
+        data:
+          description: Dữ liệu trả về (kiểu dữ liệu cụ thể phụ thuộc vào endpoint).
+          nullable: true
+          example: null
+
+    LoginRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          example: user1
+        password:
+          type: string
+          example: "123"
+      required:
+        - username
+        - password
+    
+    LoginResponse:
+      type: object
+      properties:
+        message:
+          type: string
+          example: Login successful
+        details:
+          type: string
+          example: JWT token set in HttpOnly Cookie.
+
+    # --------------------------------------------------------
+    # CUSTOMER MANAGEMENT SCHEMAS
+    # --------------------------------------------------------
+    CustomerInfoResponse:
+      type: object
+      description: Thông tin chi tiết khách hàng (không bao gồm mật khẩu)
+      properties:
+        customerId:
+          type: integer
+          format: int64
+          example: 1
+        username:
+          type: string
+          example: user1
+        fullName:
+          type: string
+          example: Nguyễn Văn A
+        email:
+          type: string
+          example: nguyenvana@example.com
+        phoneNumber:
+          type: string
+          example: "0901234567"
+        availableBalance:
+          type: integer
+          format: int32
+          example: 5000000
+        roles:
+          type: string
+          example: ROLE_USER
+          description: Vai trò của người dùng.
+      
+    DebitRequest:
+      type: object
+      properties:
+        amount:
+          type: integer
+          format: int32
+          minimum: 1
+          example: 2800000
+          description: Số tiền cần ghi nợ/ghi có.
+        description:
+          type: string
+          example: Thanh toán học phí cho ID 1
+          description: Mô tả giao dịch.
+      required:
+        - amount
+        - description
+
+    # --------------------------------------------------------
+    # TUITION SERVICE SCHEMAS
+    # --------------------------------------------------------
+    StudentTuition:
+      type: object
+      properties:
+        tuitionId:
+          type: integer
+          format: int64
+          example: 1
+        studentId:
+          type: string
+          example: 523H1101
+        studentName:
+          type: string
+          example: Nguyễn Văn A
+        amount:
+          type: integer
+          format: int32
+          example: 2800000
+        semester:
+          type: string
+          example: "I"
+        academicYear:
+          type: string
+          example: 2023-2024
+        isPaid:
+          type: boolean
+          example: false
+          description: Trạng thái thanh toán.
+          
+    TuitionPaymentRequest:
+      type: object
+      description: Request body để cập nhật trạng thái học phí.
+      properties:
+        tuitionId:
+          type: integer
+          format: int64
+          example: 1
+        isPaid:
+          type: boolean
+          example: true
+      required:
+        - tuitionId
+        - isPaid
+        
+    # --------------------------------------------------------
+    # PAYMENT PROCESSOR SCHEMAS
+    # --------------------------------------------------------
+    PaymentInitiateRequest:
+      type: object
+      description: Request body để khởi tạo thanh toán (yêu cầu OTP) hoặc gửi lại OTP.
+      properties:
+        tuitionId:
+          type: integer
+          format: int64
+          example: 1
+      required:
+        - tuitionId
+        
+    PaymentConfirmationRequest:
+      type: object
+      description: Request body để xác nhận thanh toán bằng OTP.
+      properties:
+        tuitionId:
+          type: integer
+          format: int64
+          example: 1
+        otpCode:
+          type: string
+          example: "123456"
+      required:
+        - tuitionId
+        - otpCode
+
+    PaymentTransaction:
+      type: object
+      description: Hồ sơ giao dịch thanh toán đã thành công.
+      properties:
+        paymentId:
+          type: integer
+          format: int64
+          example: 101
+        customerId:
+          type: integer
+          format: int64
+          example: 1
+        tuitionId:
+          type: integer
+          format: int64
+          example: 1
+        amount:
+          type: integer
+          format: int32
+          example: 2800000
+        paymentDate:
+          type: string
+          format: date-time
+          example: 2025-10-31T10:30:00Z
+
+  securitySchemes:
+    jwtCookie:
+      type: apiKey
+      in: cookie
+      name: jwt_token
+      description: JWT token được trả về sau khi đăng nhập thành công. (HttpOnly Cookie)
+      
+  responses:
+    Unauthorized:
+      description: Yêu cầu xác thực. JWT Cookie không được tìm thấy hoặc không hợp lệ/hết hạn.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              detail:
+                type: string
+                example: Authentication required. JWT Cookie not found.
+    BadRequestGeneric:
+      description: Lỗi nghiệp vụ hoặc lỗi dữ liệu (400 Bad Request).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/GenericResponse'
+          example:
+            success: false
+            message: Insufficient balance to perform the debit. Required 2800000, available 1000000.
+            data: null
+    NotFoundGeneric:
+      description: Không tìm thấy tài nguyên (404 Not Found).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/GenericResponse'
+          example:
+            success: false
+            message: Customer with ID 999 not found.
+            data: null
+    ForbiddenGeneric:
+      description: Không có quyền truy cập (403 Forbidden).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/GenericResponse'
+          example:
+            success: false
+            message: You do not have permission to modify this tuition record.
+            data: null
+    InternalErrorGeneric:
+      description: Lỗi hệ thống nội bộ (500 Internal Server Error).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/GenericResponse'
+          example:
+            success: false
+            message: An unexpected error occurred on the server. Please contact support.
+            data: null

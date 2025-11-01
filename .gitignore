@@ -85,3 +85,5 @@ ApiGateway/app/public_key.pem
 application-local.properties
 application-dev.properties
 *.env
+
+.DS_Store

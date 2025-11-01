@@ -1,4 +1,4 @@
-package com.example.tuition_service.dto;
+package com.example.payment_processor_service.dto;
 
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -7,7 +7,6 @@ import lombok.AllArgsConstructor;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public class TuitionPaymentRequest {
+public class PaymentInitiateRequest {
     private Long tuitionId;
-    private Boolean isPaid;
 }

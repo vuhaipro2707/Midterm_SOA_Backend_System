@@ -25,5 +25,8 @@ public class PaymentTransaction {
     private Long tuitionId;
 
     @Column(nullable = false)
+    private Integer amount;
+
+    @Column(nullable = false)
     private LocalDateTime paymentDate;
 }

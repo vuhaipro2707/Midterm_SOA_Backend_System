@@ -66,7 +66,7 @@ services:
       context: ./payment-processor-service
     container_name: payment_processor_service
     expose: 
-      - "8082"
+      - "8083"
     networks:
       - internal_network
     depends_on:
@@ -82,16 +82,40 @@ services:
       context: ./tuition-service 
     container_name: tuition_service
     expose: 
-      - "8083"
+      - "8084"
     networks:
       - internal_network
     depends_on:
       - postgres
+      - otp-service
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/mydatabase
       SPRING_DATASOURCE_USERNAME: user
       SPRING_DATASOURCE_PASSWORD: password
       SERVER_PORT: 8084
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis_cache
+    expose:
+      - "6379"
+    networks:
+      - internal_network
+
+  otp-service:
+    build: 
+      context: ./otp-service
+    container_name: otp_service
+    expose: 
+      - "8085"
+    networks:
+      - internal_network
+    depends_on:
+      - redis
+    environment:
+      SPRING_DATA_REDIS_HOST: redis 
+      SPRING_DATA_REDIS_PORT: 6379
+      SERVER_PORT: 8085
 
 networks:
   internal_network:

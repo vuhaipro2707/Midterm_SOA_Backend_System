@@ -4,9 +4,10 @@ import httpx
 from jose import jwt, JWTError
 import os
 from json.decoder import JSONDecodeError
-from urllib.parse import quote
+import yaml
 
-app = FastAPI(title="API Gateway")
+app = FastAPI(title="API Gateway",
+              openapi_url=None)
 
 PUBLIC_KEY_PATH = os.path.join(os.path.dirname(__file__), "public_key.pem")
 ALGORITHM = "RS256"
@@ -16,6 +17,7 @@ SYSTEM_SERVICES = {
     "customer": "http://customer-management-service:8082",
     "payment": "http://payment-processor-service:8083",
     "tuition": "http://tuition-service:8084",
+    "otp": "http://otp-service:8085",
 }
 
 client = httpx.AsyncClient(timeout=None)
@@ -45,6 +47,60 @@ def decode_jwt_token(token: str):
         return payload
     except JWTError as e:
         raise HTTPException(status_code=401, detail=f"Invalid authentication credentials: {e}")
+    
+
+# --- Thêm endpoint để phục vụ tài liệu OpenAPI tùy chỉnh ---
+@app.get("/openapi.json", include_in_schema=False)
+async def get_openapi_json():
+    OPENAPI_FILE_PATH = os.path.join(os.path.dirname(__file__), "openapi.yaml")
+    CUSTOM_OPENAPI_SPEC = None
+    
+    class NoDatesSafeLoader(yaml.SafeLoader):
+        @staticmethod
+        def remove_timestamp_resolver():
+            if 'tag:yaml.org,2002:timestamp' in NoDatesSafeLoader.yaml_resolvers:
+                NoDatesSafeLoader.yaml_resolvers.pop('tag:yaml.org,2002:timestamp')
+    
+    try:
+        if 'tag:yaml.org,2002:timestamp' in yaml.SafeLoader.yaml_implicit_resolvers:
+            del yaml.SafeLoader.yaml_implicit_resolvers['tag:yaml.org,2002:timestamp']
+        
+        def str_presenter(dumper, data):
+            return dumper.represent_scalar('tag:yaml.org,2002:str', data)
+
+        def str_constructor(loader, node):
+            return loader.construct_scalar(node)
+
+        yaml.add_constructor('tag:yaml.org,2002:timestamp', str_constructor, Loader=yaml.SafeLoader)
+        yaml.add_constructor('tag:yaml.org,2002:float', str_constructor, Loader=yaml.SafeLoader)
+    except Exception as e:
+        print(f"INFO: Could not modify yaml.SafeLoader: {e}")
+
+    try:
+        with open(OPENAPI_FILE_PATH, "r", encoding="utf-8") as f:
+            print(f"Loading OpenAPI specification from {OPENAPI_FILE_PATH}")
+            yaml_content = f.read()
+            CUSTOM_OPENAPI_SPEC = yaml.safe_load(yaml_content)
+            
+    except FileNotFoundError:
+        print(f"FATAL ERROR: OpenAPI specification file not found at {OPENAPI_FILE_PATH}")
+    except Exception as e:
+        print(f"FATAL ERROR: Error loading OpenAPI specification: {e}")
+    
+    if CUSTOM_OPENAPI_SPEC is None:
+         raise HTTPException(status_code=500, detail="OpenAPI specification is not available.")
+         
+    return JSONResponse(CUSTOM_OPENAPI_SPEC)
+
+# Sử dụng Swagger UI tùy chỉnh
+@app.get("/docs", include_in_schema=False)
+async def custom_swagger_ui_html():
+    from fastapi.openapi.docs import get_swagger_ui_html
+    return get_swagger_ui_html(
+        openapi_url="/openapi.json",
+        title=app.title + " - Swagger UI"
+    )
+# --------------------------------------------------------
 
 
 @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])

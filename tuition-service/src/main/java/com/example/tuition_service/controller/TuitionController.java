@@ -42,14 +42,13 @@ public class TuitionController {
 
     @PostMapping("/status")
     public ResponseEntity<GenericResponse<StudentTuition>> updateTuitionStatus(@RequestBody TuitionPaymentRequest request) {
-        if (request.getTuitionId() == null || request.getIsPaid() == null || request.getStudentId() == null) {
-             return ResponseEntity.badRequest().body(GenericResponse.failure("Invalid request: tuitionId, isPaid status, and studentId are required."));
+        if (request.getTuitionId() == null || request.getIsPaid() == null) {
+             return ResponseEntity.badRequest().body(GenericResponse.failure("Invalid request: tuitionId and isPaid status are required."));
         }
         
         try {
             Optional<StudentTuition> updatedTuitionOpt = tuitionService.updateTuitionStatus(
                 request.getTuitionId(),
-                request.getStudentId(),
                 request.getIsPaid()
             );
         

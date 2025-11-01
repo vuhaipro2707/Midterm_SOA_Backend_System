@@ -46,4 +46,27 @@ services:
     ports: 
       - "8084:8084"
 
+  redis:
+    image: redis:7-alpine
+    container_name: redis_cache
+    ports:
+      - "6379:6379"
+
+  otp-service:
+    build: 
+      context: ./otp-service
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./otp-service:/app
+      - ./.m2cache:/root/.m2
+    command: ["mvn", "spring-boot:run"]
+    ports: 
+      - "8085:8085"
+    depends_on:
+      - redis
+    environment:
+      SPRING_DATA_REDIS_HOST: redis 
+      SPRING_DATA_REDIS_PORT: 6379
+      SERVER_PORT: 8085
+
   
