@@ -15,10 +15,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 import java.util.List;
-
+import java.util.Locale;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.Map;
+import java.text.NumberFormat;
 
 @Service
 public class PaymentService {
@@ -34,6 +35,9 @@ public class PaymentService {
     private static final String CUSTOMER_SERVICE_BASE_URL = "http://customer-management-service:8082";
     private static final String TUITION_SERVICE_BASE_URL = "http://tuition-service:8084";
     private static final String OTP_SERVICE_BASE_URL = "http://otp-service:8085";
+    private static final String MAIL_SERVICE_BASE_URL = "http://mail-service:8086";
+
+    private record SendMailRequest(String to, String subject, String body) {}
 
     @Transactional(readOnly = true)
     public List<PaymentTransaction> getPaymentHistory(Long customerId) {
@@ -46,12 +50,19 @@ public class PaymentService {
             throw new IllegalArgumentException("Tuition ID " + request.getTuitionId() + " has already been paid.");
         }
 
+        Integer requiredAmount = getRequiredAmount(customerId, request.getTuitionId());
+        Integer availableBalance = getAvailableBalance(customerId);
+        
+        if (availableBalance < requiredAmount) {
+            throw new IllegalArgumentException("Insufficient balance to perform the debit. Required " + requiredAmount + ", available " + availableBalance + ".");
+        }
+
         OtpServiceResponse otpResult = getOtpFromService(customerId, request.getTuitionId(), "/generate");
         String otpCode = otpResult.otpCode();
 
         if (!otpResult.statusMessage().contains("Existing")) {
             String customerEmail = getCustomerEmail(customerId);
-            //sendOtpEmail(customerEmail, otpCode, request.getTuitionId(), request.getAmount());
+            sendOtpEmail(customerId, request.getTuitionId(), otpCode, requiredAmount, customerEmail);
             System.out.println("OTP Code for Tuition ID " + request.getTuitionId() + " sent to email: " + customerEmail + " is: " + otpCode);
         } else {
              System.out.println("[INFO] Existing OTP reused for Tuition ID " + request.getTuitionId() + ". Skipping email dispatch.");
@@ -61,6 +72,10 @@ public class PaymentService {
 
     @Transactional(isolation = Isolation.REPEATABLE_READ)
     public PaymentTransaction confirmPayment(Long customerId, PaymentConfirmationRequest request) {
+        if (paymentTransactionRepository.findByTuitionId(request.getTuitionId()).isPresent()) {
+            throw new IllegalArgumentException("Tuition ID " + request.getTuitionId() + " has already been paid.");
+        }
+        
         Mono<GenericResponse<Object>> otpValidateMono = createOtpValidationMono(customerId, request.getTuitionId(), request.getOtpCode());
         try {
             otpValidateMono.block();
@@ -127,13 +142,20 @@ public class PaymentService {
     @Transactional(readOnly = true)
     public void resendOtp(Long customerId, PaymentInitiateRequest request) {
         if (paymentTransactionRepository.findByTuitionId(request.getTuitionId()).isPresent()) {
-            throw new IllegalArgumentException("Tuition ID " + request.getTuitionId() + " has already been paid. Resend is unnecessary.");
+            throw new IllegalArgumentException("Tuition ID " + request.getTuitionId() + " has already been paid.");
         }
 
-        // Gọi trực tiếp đến endpoint /resend của OTP Service để buộc tạo mã mới
+        Integer requiredAmount = getRequiredAmount(customerId, request.getTuitionId());
+        Integer availableBalance = getAvailableBalance(customerId);
+        
+        if (availableBalance < requiredAmount) {
+            throw new IllegalArgumentException("Insufficient balance to perform the debit. Required " + requiredAmount + ", available " + availableBalance + ".");
+        }
+
         OtpServiceResponse otpResult = getOtpFromService(customerId, request.getTuitionId(), "/resend"); 
 
         String customerEmail = getCustomerEmail(customerId);
+        sendOtpEmail(customerId, request.getTuitionId(), otpResult.otpCode(), requiredAmount, customerEmail);
         System.out.println("[INFO] Forced RESEND. Old OTP deleted. New OTP for Tuition ID " + request.getTuitionId() + " sent to email: " + customerEmail + " is: " + otpResult.otpCode());
     }
 
@@ -201,14 +223,66 @@ public class PaymentService {
         }
     }
 
-    // private void sendOtpEmail(String email, String otpCode, Long tuitionId, Integer amount) {
-    //     // [MOCK] Mô phỏng gọi Mail Service.
-    //     System.out.println("--- [MAIL SERVICE MOCK] ---");
-    //     System.out.println("TO: " + email);
-    //     System.out.println("SUBJECT: Your OTP for Tuition Payment");
-    //     System.out.println("BODY: Your One-Time Password for payment (Tuition ID: " + tuitionId + ", Amount: " + amount + ") is: " + otpCode);
-    //     System.out.println("-------------------------");
-    // }
+    private void sendOtpEmail(Long customerId, Long tuitionId, String otpCode, Integer requiredAmount, String customerEmail) {
+        
+        NumberFormat formatter = NumberFormat.getInstance(Locale.forLanguageTag("vi-VN"));
+        String formattedAmount = formatter.format(requiredAmount) + " VND";
+        
+        String subject = String.format("Mã OTP cho thanh toán học phí (ID: %d)", tuitionId);
+        String body = String.format(
+            "Mã OTP của bạn để xác nhận thanh toán học phí (ID: %d, Số tiền: %s) là: %s. \n\nMã này sẽ hết hạn sau 5 phút.", 
+            tuitionId, 
+            formattedAmount, 
+            otpCode
+        );
+
+        try {
+            Mono<GenericResponse<Void>> mailMono = createSendMailMono(customerEmail, subject, body, customerId);
+            mailMono.block();
+            System.out.println("OTP Code for Tuition ID " + tuitionId + " successfully sent to email: " + customerEmail);
+
+        } catch (Exception e) {
+            System.err.println("WARNING: Failed to send OTP email via Mail Service: " + e.getMessage());
+        }
+    }
+
+    public void sendPaymentSuccessEmail(Long customerId, Long tuitionId, Integer paidAmount) {
+        String customerEmail = getCustomerEmail(customerId);
+
+        NumberFormat formatter = NumberFormat.getInstance(Locale.forLanguageTag("vi-VN"));
+        String formattedAmount = formatter.format(paidAmount) + " VND";
+        
+        String subject = String.format("Thanh toán học phí thành công (ID: %d)", tuitionId);
+        String body = String.format(
+            "Xin chúc mừng! Giao dịch thanh toán học phí (ID: %d) với số tiền %s đã được thực hiện thành công. \n\nCảm ơn bạn đã sử dụng dịch vụ của chúng tôi.", 
+            tuitionId, 
+            formattedAmount
+        );
+
+        try {
+            Mono<GenericResponse<Void>> mailMono = createSendMailMono(customerEmail, subject, body, customerId);
+            mailMono.block();
+            System.out.println("Payment Success email for Tuition ID " + tuitionId + " successfully sent to email: " + customerEmail);
+        } catch (Exception e) {
+            System.err.println("WARNING: Failed to send Payment Success email via Mail Service: " + e.getMessage());
+        }
+    }
+
+    private Mono<GenericResponse<Void>> createSendMailMono(String to, String subject, String body, Long customerId) {
+        SendMailRequest mailRequest = new SendMailRequest(to, subject, body);
+
+        return webClient.post()
+            .uri(MAIL_SERVICE_BASE_URL + "/send")
+            .header(HttpHeaders.CONTENT_TYPE, "application/json")
+            .header("X-Customer-Id", String.valueOf(customerId)) 
+            .bodyValue(mailRequest)
+            .retrieve()
+            .onStatus(HttpStatusCode::isError, clientResponse -> 
+                clientResponse.bodyToMono(new ParameterizedTypeReference<GenericResponse<Void>>() {})
+                    .flatMap(response -> Mono.error(new RuntimeException("Mail Service Failed: " + response.getMessage())))
+            )
+            .bodyToMono(new ParameterizedTypeReference<GenericResponse<Void>>() {});
+    }
     
     private void compensateCustomerDebit(Long customerId, Integer amount, Long tuitionId) {
         System.err.println("[COMPENSATION] Tuition Update failed. Attempting to CREDIT back amount " + amount + " for customer ID: " + customerId);
@@ -221,6 +295,63 @@ public class PaymentService {
         } catch (Exception compensationError) {
             System.err.println("CRITICAL ERROR: Compensation (Credit) failed for Customer ID " + customerId + ". State is now INCONSISTENT! MANUAL INTERVENTION REQUIRED!");
             throw new RuntimeException("Compensation (Credit) failed, System state inconsistent. Manual check required for Customer ID: " + customerId + ". " + compensationError.getMessage(), compensationError);
+        }
+    }
+
+    private Integer getRequiredAmount(Long customerId, Long tuitionId) {
+        try {
+            Mono<GenericResponse<Object>> tuitionMono = createGetTuitionMono(customerId, tuitionId);
+            GenericResponse<Object> tuitionResponse = tuitionMono.block();
+            
+            if (tuitionResponse != null && tuitionResponse.isSuccess() && tuitionResponse.getData() instanceof Map) {
+                Map<?, ?> responseData = (Map<?, ?>)tuitionResponse.getData();
+                Object amountObj = responseData.get("amount");
+                
+                if (amountObj instanceof Number) {
+                    return ((Number)amountObj).intValue(); 
+                }
+            }
+            
+            String message = tuitionResponse != null && tuitionResponse.getMessage() != null ? 
+                             tuitionResponse.getMessage() : 
+                             "Tuition details could not be retrieved.";
+            throw new IllegalArgumentException("Missing or invalid amount in tuition record: " + message);
+            
+        } catch (IllegalArgumentException e) {
+            throw e; 
+        } catch (Exception e) {
+            throw mapToPaymentFailure("Tuition Fetch Failed", e);
+        }
+    }
+
+    private Mono<GenericResponse<Integer>> createGetBalanceMono(Long customerId) {
+        return webClient.get()
+            .uri(CUSTOMER_SERVICE_BASE_URL + "/balance")
+            .header("X-Customer-Id", String.valueOf(customerId)) 
+            .retrieve()
+            .onStatus(HttpStatusCode::isError, clientResponse -> 
+                clientResponse.bodyToMono(new ParameterizedTypeReference<GenericResponse<Object>>() {})
+                    .flatMap(response -> Mono.error(new RuntimeException("Customer Balance Fetch Failed: " + response.getMessage())))
+            )
+            .bodyToMono(new ParameterizedTypeReference<GenericResponse<Integer>>() {}); 
+    }
+
+    private Integer getAvailableBalance(Long customerId) {
+        try {
+            Mono<GenericResponse<Integer>> balanceMono = createGetBalanceMono(customerId);
+            GenericResponse<Integer> balanceResponse = balanceMono.block();
+
+            if (balanceResponse != null && balanceResponse.isSuccess() && balanceResponse.getData() != null) {
+                return balanceResponse.getData();
+            }
+            
+            String message = balanceResponse != null && balanceResponse.getMessage() != null ? 
+                             balanceResponse.getMessage() : 
+                             "Customer balance could not be retrieved.";
+            throw new RuntimeException(message);
+
+        } catch (Exception e) {
+             throw mapToPaymentFailure("Customer Balance Fetch Failed", e);
         }
     }
 

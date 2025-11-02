@@ -22,6 +22,10 @@ tags:
     description: Quản lý hồ sơ học phí của sinh viên
   - name: Payment Processor Service
     description: Xử lý giao dịch thanh toán học phí (Giao dịch phân tán - Saga Pattern)
+  - name: OTP Service (Internal)
+    description: Quản lý mã OTP (Chỉ dùng nội bộ bởi Payment Processor)
+  - name: Mail Service (Internal)
+    description: Gửi email (Chỉ dùng nội bộ bởi Payment Processor)
 
 paths:
   # --------------------------------------------------------
@@ -158,7 +162,7 @@ paths:
     post:
       tags:
         - Customer Management Service
-      summary: Ghi nợ (debit) số dư của khách hàng đã xác thực.
+      summary: Ghi nợ (debit) số dư của khách hàng đã xác thực. (Chỉ dùng nội bộ bởi Payment Processor)
       operationId: debitCustomerBalance
       requestBody:
         required: true
@@ -194,7 +198,7 @@ paths:
     post:
       tags:
         - Customer Management Service
-      summary: Ghi có (credit) số dư của khách hàng đã xác thực. (Dùng cho Compensation)
+      summary: Ghi có (credit) số dư của khách hàng đã xác thực. (Dùng cho Compensation) (Chỉ dùng nội bộ bởi Payment Processor)
       operationId: creditCustomerBalance
       requestBody:
         required: true
@@ -398,7 +402,7 @@ paths:
                           $ref: '#/components/schemas/PaymentTransaction'
               example:
                 success: true
-                message: Payment history retrieved successfully.
+                message: Payment transaction history retrieved successfully.
                 data:
                   - paymentId: 101
                     customerId: 1
@@ -534,10 +538,172 @@ paths:
         '500':
           $ref: '#/components/responses/InternalErrorGeneric'
 
+  # --------------------------------------------------------
+  # OTP SERVICE ENDPOINTS (INTERNAL)
+  # --------------------------------------------------------
+  /otp/generate:
+    post:
+      tags:
+        - OTP Service (Internal)
+      summary: Tạo hoặc lấy lại OTP cho một khoản học phí.
+      operationId: generateOtpInternal
+      description: Dùng nội bộ, yêu cầu header X-Customer-Id.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtpGenerateRequest'
+      responses:
+        '200':
+          description: OTP được tạo hoặc tái sử dụng thành công.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/GenericResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          otpCode:
+                            type: string
+                            example: "123456"
+                          statusMessage:
+                            type: string
+                            example: Existing unexpired OTP found. Reusing it.
+              example:
+                success: true
+                message: Existing unexpired OTP found. Reusing it.
+                data:
+                  otpCode: "123456"
+                  statusMessage: Existing unexpired OTP found. Reusing it.
+        '400':
+          description: Lỗi nghiệp vụ (ví dụ 'tuitionId is required.').
+          $ref: '#/components/responses/BadRequestGeneric'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /otp/resend:
+    post:
+      tags:
+        - OTP Service (Internal)
+      summary: Xóa OTP cũ và tạo OTP mới cho một khoản học phí.
+      operationId: resendOtpInternal
+      description: Dùng nội bộ, yêu cầu header X-Customer-Id.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtpGenerateRequest'
+      responses:
+        '200':
+          description: OTP mới đã được tạo thành công.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/GenericResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: object
+                        properties:
+                          otpCode:
+                            type: string
+                            example: "654321"
+                          statusMessage:
+                            type: string
+                            example: Old OTP deleted and new OTP generated successfully.
+              example:
+                success: true
+                message: Old OTP deleted and new OTP generated successfully.
+                data:
+                  otpCode: "654321"
+                  statusMessage: Old OTP deleted and new OTP generated successfully.
+        '400':
+          description: Lỗi nghiệp vụ.
+          $ref: '#/components/responses/BadRequestGeneric'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+          
+  /otp/validate:
+    post:
+      tags:
+        - OTP Service (Internal)
+      summary: Xác thực OTP và xóa mã OTP đã dùng thành công.
+      operationId: validateOtpInternal
+      description: Dùng nội bộ, yêu cầu header X-Customer-Id.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentConfirmationRequest' # Tái sử dụng schema
+      responses:
+        '200':
+          description: Xác thực OTP thành công.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+              example:
+                success: true
+                message: OTP validated successfully.
+                data: null
+        '401':
+          description: Mã OTP không hợp lệ hoặc hết hạn.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+              example:
+                success: false
+                message: Invalid or expired OTP.
+                data: null
+        '400':
+          description: Lỗi request (ví dụ thiếu trường).
+          $ref: '#/components/responses/BadRequestGeneric'
+          
+  # --------------------------------------------------------
+  # MAIL SERVICE ENDPOINTS (INTERNAL)
+  # --------------------------------------------------------
+  /mail/send:
+    post:
+      tags:
+        - Mail Service (Internal)
+      summary: Gửi email đơn giản.
+      operationId: sendMailInternal
+      description: Dùng nội bộ, không cần header X-Customer-Id cho dịch vụ Mail, nhưng Gateway sẽ tự động thêm.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMailRequest'
+      responses:
+        '200':
+          description: Email đã được gửi thành công.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+              example:
+                success: true
+                message: Email sent successfully.
+                data: null
+        '400':
+          description: Lỗi request (ví dụ thiếu trường 'to', 'subject', 'body').
+          $ref: '#/components/responses/BadRequestGeneric'
+        '500':
+          $ref: '#/components/responses/InternalErrorGeneric'
+
 components:
   schemas:
     # --------------------------------------------------------
-    # GENERIC RESPONSE & AUTH SCHEMAS
+    # GENERIC RESPONSE & AUTH SCHEMAS 
     # --------------------------------------------------------
     GenericResponse:
       type: object
@@ -579,7 +745,7 @@ components:
           example: JWT token set in HttpOnly Cookie.
 
     # --------------------------------------------------------
-    # CUSTOMER MANAGEMENT SCHEMAS
+    # CUSTOMER MANAGEMENT SCHEMAS (Không đổi)
     # --------------------------------------------------------
     CustomerInfoResponse:
       type: object
@@ -628,7 +794,7 @@ components:
         - description
 
     # --------------------------------------------------------
-    # TUITION SERVICE SCHEMAS
+    # TUITION SERVICE SCHEMAS 
     # --------------------------------------------------------
     StudentTuition:
       type: object
@@ -674,7 +840,7 @@ components:
         - isPaid
         
     # --------------------------------------------------------
-    # PAYMENT PROCESSOR SCHEMAS
+    # PAYMENT PROCESSOR SCHEMAS 
     # --------------------------------------------------------
     PaymentInitiateRequest:
       type: object
@@ -726,6 +892,45 @@ components:
           type: string
           format: date-time
           example: 2025-10-31T10:30:00Z
+
+    # --------------------------------------------------------
+    # OTP SERVICE SCHEMAS
+    # --------------------------------------------------------
+    OtpGenerateRequest:
+      type: object
+      description: Request body để tạo hoặc gửi lại OTP. (Tái sử dụng PaymentInitiateRequest)
+      properties:
+        tuitionId:
+          type: integer
+          format: int64
+          example: 1
+      required:
+        - tuitionId
+
+    # --------------------------------------------------------
+    # MAIL SERVICE SCHEMAS
+    # --------------------------------------------------------
+    SendMailRequest:
+      type: object
+      description: Request body để gửi mail.
+      properties:
+        to:
+          type: string
+          format: email
+          example: recipient@example.com
+          description: Địa chỉ email người nhận.
+        subject:
+          type: string
+          example: Mã OTP của bạn
+          description: Tiêu đề email.
+        body:
+          type: string
+          example: Mã OTP là 123456.
+          description: Nội dung email (plain text).
+      required:
+        - to
+        - subject
+        - body
 
   securitySchemes:
     jwtCookie:

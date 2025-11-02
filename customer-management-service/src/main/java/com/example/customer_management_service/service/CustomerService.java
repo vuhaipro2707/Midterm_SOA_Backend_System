@@ -39,7 +39,7 @@ public class CustomerService {
         Integer currentBalance = customer.getAvailableBalance();
         
         if (currentBalance < amount) {
-            throw new IllegalArgumentException("Insufficient balance.");
+            throw new IllegalArgumentException("Insufficient balance to perform the debit. Required " + amount + ", available " + currentBalance + ".");
         }
         
         Integer newBalance = currentBalance - amount;

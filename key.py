@@ -1,11 +1,25 @@
+import os
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
+
+# Định nghĩa đường dẫn tương đối để lưu khóa
+# Private Key được lưu trong auth-service/src/main/resources/keys/
+PRIVATE_KEY_PATH = "auth-service/src/main/resources/keys/private_key.pem"
+# Public Key được lưu trong ApiGateway/app/
+PUBLIC_KEY_PATH = "ApiGateway/app/public_key.pem"
 
 # Kích thước khóa (2048-bit)
 KEY_SIZE = 2048
 # Lệnh 'exponent' OpenSSL tương đương với public_exponent
 PUBLIC_EXPONENT = 65537
+
+def create_directory(path):
+    """Tạo thư mục của đường dẫn nếu nó chưa tồn tại."""
+    dir_name = os.path.dirname(path)
+    if dir_name and not os.path.exists(dir_name):
+        os.makedirs(dir_name)
+        print(f"📁 Đã tạo thư mục: {dir_name}")
 
 # --- 1. TẠO PRIVATE KEY THÔ (Dạng RSA) và PUBLIC KEY ---
 # cryptography tạo cả hai cùng lúc
@@ -23,14 +37,14 @@ private_key_pkcs8_pem = private_key.private_bytes(
     encoding=serialization.Encoding.PEM,
     format=serialization.PrivateFormat.PKCS8,
     # Mã hóa (encryption_algorithm) đặt là NoEncryption() tương đương với -nocrypt
-    # Tệp này là private_key.pem
     encryption_algorithm=serialization.NoEncryption()
 )
 
 # Lưu tệp private_key.pem
-with open("private_key.pem", "wb") as f:
+create_directory(PRIVATE_KEY_PATH)
+with open(PRIVATE_KEY_PATH, "wb") as f:
     f.write(private_key_pkcs8_pem)
-    print("✅ Đã tạo tệp private_key.pem (PKCS#8).")
+    print(f"✅ Đã tạo tệp Private Key (PKCS#8) tại: {PRIVATE_KEY_PATH}")
 
 # --- 3. TẠO PUBLIC KEY TỪ PRIVATE KEY ---
 # Tương đương: openssl rsa -pubout
@@ -41,11 +55,9 @@ public_key_pem = public_key.public_bytes(
 )
 
 # Lưu tệp public_key.pem
-with open("public_key.pem", "wb") as f:
+create_directory(PUBLIC_KEY_PATH)
+with open(PUBLIC_KEY_PATH, "wb") as f:
     f.write(public_key_pem)
-    print("✅ Đã tạo tệp public_key.pem.")
+    print(f"✅ Đã tạo tệp Public Key tại: {PUBLIC_KEY_PATH}")
 
-# --- 4. (Tùy chọn) Xóa khóa thô ---
-# Trong code Python này, khóa thô chỉ tồn tại trong bộ nhớ (biến private_key)
-# và không được ghi ra đĩa dưới dạng tệp private_rsa.pem, nên không cần xóa.
-print("📌 Lưu ý: Khóa thô (private_rsa.pem) không được tạo ra tệp trên đĩa, nên không cần xóa.")
+print("📌 Lưu ý: Việc tạo khóa hoàn tất.")

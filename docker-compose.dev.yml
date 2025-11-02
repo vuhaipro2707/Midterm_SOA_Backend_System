@@ -69,4 +69,18 @@ services:
       SPRING_DATA_REDIS_PORT: 6379
       SERVER_PORT: 8085
 
+  mail-service:
+    build: 
+      context: ./mail-service 
+      dockerfile: Dockerfile.dev 
+    volumes:
+      - ./mail-service:/app
+      - ./.m2cache:/root/.m2
+    command: ["mvn", "spring-boot:run"]
+    ports: 
+      - "8086:8086"
+    environment:
+      MAIL_USERNAME: ${MAIL_USERNAME}
+      MAIL_PASSWORD: ${MAIL_PASSWORD}
+
   

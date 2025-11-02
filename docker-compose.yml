@@ -117,6 +117,18 @@ services:
       SPRING_DATA_REDIS_PORT: 6379
       SERVER_PORT: 8085
 
+  mail-service:
+    build:
+      context: ./mail-service 
+    container_name: mail_service
+    expose:
+      - "8086"
+    networks:
+      - internal_network
+    environment:
+      MAIL_USERNAME: ${MAIL_USERNAME}
+      MAIL_PASSWORD: ${MAIL_PASSWORD}
+
 networks:
   internal_network:
     driver: bridge

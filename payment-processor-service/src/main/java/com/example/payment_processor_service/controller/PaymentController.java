@@ -84,6 +84,7 @@ public class PaymentController {
         
         try {
             PaymentTransaction transaction = paymentService.confirmPayment(customerId, request);
+            paymentService.sendPaymentSuccessEmail(customerId, request.getTuitionId(), transaction.getAmount());
             return ResponseEntity.ok(GenericResponse.success("Payment successful and transaction recorded.", transaction));
             
         } catch (IllegalArgumentException e) {
