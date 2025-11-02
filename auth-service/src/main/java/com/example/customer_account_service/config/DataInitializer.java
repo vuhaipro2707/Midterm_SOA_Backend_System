@@ -29,13 +29,9 @@ public class DataInitializer {
                 // 1. Tạo danh sách các khách hàng mẫu
                 List<Customer> initialCustomers = Arrays.asList(
                     // Khách hàng 1: user có vai trò mặc định
-                    createCustomer("user1", "123", "Nguyễn Văn A", "vuhaipro2707@gmail.com", "0901234567", 5000000, "ROLE_USER"),
-                    
-                    // Khách hàng 2: user 
-                    createCustomer("user2", "1234", "Trần Thị B", "vuhaipro1234231@gmail.com", "0918765432", 10000000, "ROLE_USER"),
-
-                    // Khách hàng 3: user khác
-                    createCustomer("user3", "12345", "Phạm Văn C", "phamvan@example.com", "0987654321", 1000000, "ROLE_USER")
+                    createCustomer("user1", "123", "Vũ Thanh Hải", "vuhaipro2707@gmail.com", "0901234567", 5000000, "ROLE_USER"),
+                    createCustomer("user2", "1234", "Huỳnh Đặng Tấn Phát", "vuhaipro1234231@gmail.com", "0918765432", 3000000, "ROLE_USER"),
+                    createCustomer("user3", "12345", "Nguyễn Anh Quốc", "vuhaipro12342312.com", "0987654321", 1000000, "ROLE_USER")
                 );
 
                 // 2. Lưu toàn bộ danh sách vào cơ sở dữ liệu
